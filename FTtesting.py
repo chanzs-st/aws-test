@@ -22,78 +22,86 @@ import torch
 import numpy as np
 
 filename = "training.txt"
+
 with open (filename, "a") as file:
+    file.write("Loading dataset"+"\n")
 
-    #load_dataset
-    dataset = load_dataset('shawhin/imdb-truncated')
-    dataset
+#load_dataset
+dataset = load_dataset('shawhin/imdb-truncated')
+dataset
 
-    #display % of training data with label =1
-    np.array(dataset['train']['label']).sum()/len(dataset['train']['label'])
-    print(np.array(dataset['train']['label']).sum())
+#display % of training data with label =1
+np.array(dataset['train']['label']).sum()/len(dataset['train']['label'])
+print(np.array(dataset['train']['label']).sum())
 
-    model_checkpoint = 'distilbert-base-uncased'
-    #model_checkpoint = 'roberta-base'
+model_checkpoint = 'distilbert-base-uncased'
+#model_checkpoint = 'roberta-base'
 
-    #define label maps
-    id2label = {0:"Negative", 1:"Positive"}
-    label2id = {"Negative":0,"Positive":1}
+#define label maps
+id2label = {0:"Negative", 1:"Positive"}
+label2id = {"Negative":0,"Positive":1}
 
-    #generate classification model from model_checkpoint
-    model = AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num_labels=2, id2label=id2label, label2id=label2id)
+with open (filename, "a") as file:
+    file.write("Loading Model"+"\n")
+#generate classification model from model_checkpoint
+model = AutoModelForSequenceClassification.from_pretrained(model_checkpoint, num_labels=2, id2label=id2label, label2id=label2id)
 
-    #create tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_checkpoint,add_prefix_space=True)
+#create tokenizer
+tokenizer = AutoTokenizer.from_pretrained(model_checkpoint,add_prefix_space=True)
 
-    #create tokenize function
-    def tokenize_function(examples):
-        #extract text
-        text = examples["text"] # "text" from the dataset object 
+#create tokenize function
+def tokenize_function(examples):
+    #extract text
+    text = examples["text"] # "text" from the dataset object 
 
-        #tokenize and truncate text
-        tokenizer.truncation_side = "left"
-        tokenized_inputs = tokenizer(
-            text,
-            return_tensors ="np",
-            truncation = True,
-            max_length = 512
-        )
+    #tokenize and truncate text
+    tokenizer.truncation_side = "left"
+    tokenized_inputs = tokenizer(
+        text,
+        return_tensors ="np",
+        truncation = True,
+        max_length = 512
+    )
 
-        return tokenized_inputs
+    return tokenized_inputs
 
-    #add pad token if none exists
-    if tokenizer.pad_token is None:
-        tokenizer.add_special_tokens({'pad_token':'[PAD]'})
-        model.resize_token_embeddings(len(tokenizer))
+with open (filename, "a") as file:
+    file.write("Tokenizing data"+"\n")
 
-    #tokenize training and validation datasets
-    tokenized_dataset = dataset.map(tokenize_function, batched = True)
-    tokenized_dataset
+#add pad token if none exists
+if tokenizer.pad_token is None:
+    tokenizer.add_special_tokens({'pad_token':'[PAD]'})
+    model.resize_token_embeddings(len(tokenizer))
 
-    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+#tokenize training and validation datasets
+tokenized_dataset = dataset.map(tokenize_function, batched = True)
+tokenized_dataset
 
-    #import accuracy evaluation metric
-    accuracy = evaluate.load("accuracy")
+data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-    #p = model output
-    def compute_metrics(p):
-        predictions, labels = p
-        predictions = np.argmax(predictions, axis = 1)
+#import accuracy evaluation metric
+accuracy = evaluate.load("accuracy")
 
-        return {"accuracy": accuracy.compute(predictions=predictions , references=labels)}
+#p = model output
+def compute_metrics(p):
+    predictions, labels = p
+    predictions = np.argmax(predictions, axis = 1)
 
-    #define list of examples
-    text_list = ["It was good.", "Not a fan, do not recommend.","Better than the first one.","This is not worth watching even once.", "This one is a pass."]
+    return {"accuracy": accuracy.compute(predictions=predictions , references=labels)}
 
-    label1 = "Untrained model predictions:"
-    label2 = "----------------------------"
-    print(label1)
-    print(label2)
+#define list of examples
+text_list = ["It was good.", "Not a fan, do not recommend.","Better than the first one.","This is not worth watching even once.", "This one is a pass."]
 
+label1 = "Untrained model predictions:"
+label2 = "----------------------------"
+print(label1)
+print(label2)
+with open (filename, "a") as file:
     file.write(label1 + "\n")
     file.write(label2 + "\n")
-        
-
+    
+with open (filename, "a") as file:
+    file.write("Testing dataset"+"\n") 
     for text in text_list:
         #tokenize text
         inputs = tokenizer.encode(text, return_tensors='pt')
@@ -107,51 +115,59 @@ with open (filename, "a") as file:
         
         file.write(output1 + "\n")
 
-    peft_config = LoraConfig(task_type = "SEQ_CLS", #sequence classification
-                            r=4,#intrinsic rank of trainable weight matrix
-                            lora_alpha=32, # learning rate
-                            lora_dropout=0.01, # probability of dropout
-                            target_modules = ['q_lin']) # we apply lora to query layer
+peft_config = LoraConfig(task_type = "SEQ_CLS", #sequence classification
+                        r=4,#intrinsic rank of trainable weight matrix
+                        lora_alpha=32, # learning rate
+                        lora_dropout=0.01, # probability of dropout
+                        target_modules = ['q_lin']) # we apply lora to query layer
 
-    model = get_peft_model(model, peft_config)
-    model.print_trainable_parameters()
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
 
-    lr = 1e-3
-    batch_size = 4
-    num_epochs=10
-
-    #define training arguments
-    training_args = TrainingArguments(
-        output_dir= model_checkpoint + '-lora-text-classification',
-        learning_rate = lr,
-        per_device_train_batch_size = batch_size,
-        per_device_eval_batch_size = batch_size,
-        num_train_epochs= num_epochs,
-        weight_decay = 0.01,
-        evaluation_strategy = "epoch",
-        save_strategy = "epoch",
-        load_best_model_at_end= True
-    )
-
-    trainer = Trainer(
-        model = model, #peft model
-        args = training_args, #hyper parameters
-        train_dataset=tokenized_dataset['train'], # training data
-        eval_dataset = tokenized_dataset["validation"], # validation data
-        tokenizer = tokenizer, #define tokenizer
-        data_collator = data_collator, # dynamically pad examples in each batch
-        compute_metrics = compute_metrics, # evalute model using function defined earlier
-    )
-
-    trainer.train()
-
-    model.to('cpu')
-
-    print("Trained model predictions:")
-    print("--------------------------")
-    text_list = ["It was good.", "Not a fan, do not recommend.","Better than the first one.","This is not worth watching even once.", "This one is a pass.","Why did i waste my morning nap for this", "Sad that the ending was happy"]
+lr = 1e-3
+batch_size = 4
+num_epochs=10
 
 
+with open (filename, "a") as file:
+    file.write("Defining training arguments"+"\n") 
+
+#define training arguments
+training_args = TrainingArguments(
+    output_dir= model_checkpoint + '-lora-text-classification',
+    learning_rate = lr,
+    per_device_train_batch_size = batch_size,
+    per_device_eval_batch_size = batch_size,
+    num_train_epochs= num_epochs,
+    weight_decay = 0.01,
+    evaluation_strategy = "epoch",
+    save_strategy = "epoch",
+    load_best_model_at_end= True
+)
+
+trainer = Trainer(
+    model = model, #peft model
+    args = training_args, #hyper parameters
+    train_dataset=tokenized_dataset['train'], # training data
+    eval_dataset = tokenized_dataset["validation"], # validation data
+    tokenizer = tokenizer, #define tokenizer
+    data_collator = data_collator, # dynamically pad examples in each batch
+    compute_metrics = compute_metrics, # evalute model using function defined earlier
+)
+
+with open (filename, "a") as file:
+    file.write("Training model..."+"\n")
+
+trainer.train()
+
+model.to('cpu')
+
+print("Trained model predictions:")
+print("--------------------------")
+text_list = ["It was good.", "Not a fan, do not recommend.","Better than the first one.","This is not worth watching even once.", "This one is a pass.","Why did i waste my morning nap for this", "Sad that the ending was happy"]
+
+with open (filename, "a") as file:
+    file.write("Model predictions:"+"\n")
     for text in text_list:
         inputs = tokenizer.encode(text,return_tensors = 'pt').to("cpu")
 
@@ -160,6 +176,7 @@ with open (filename, "a") as file:
 
         print(text + " - " + id2label[predictions.tolist()[0]])
 
-    training_args.output_dir = './'  # Set desired output directory
+training_args.output_dir = './'  # Set desired output directory
 
-    file.write("Model done training")
+with open (filename, "a") as file:
+    file.write("Model done training"+"\n")
